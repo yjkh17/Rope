@@ -27,6 +27,8 @@ final class RopeRenderView: NSView {
     private let constraintIterations = 12
     private let segmentCount = 28
 
+    private var fallbackPosition: CGPoint { CGPoint(x: bounds.midX, y: bounds.midY) }
+
     override var isFlipped: Bool { true }
 
     override init(frame frameRect: NSRect) {
@@ -53,7 +55,7 @@ final class RopeRenderView: NSView {
         super.viewDidMoveToWindow()
 
         if window != nil {
-            resetRope(initialPosition: currentCursorLocation())
+            resetRope(initialPosition: sanitized(currentCursorLocation()))
             startDisplayLink()
         } else {
             stopDisplayLink()
@@ -66,15 +68,16 @@ final class RopeRenderView: NSView {
         if lastBoundsSize != newSize {
             lastBoundsSize = newSize
             if window != nil {
-                resetRope(initialPosition: currentCursorLocation())
+                resetRope(initialPosition: sanitized(currentCursorLocation()))
             }
         }
     }
 
     private func resetRope(initialPosition: CGPoint) {
+        let safePosition = sanitized(initialPosition)
         points = (0..<segmentCount).map { index in
             let offset = CGFloat(index) * segmentLength
-            let pos = CGPoint(x: initialPosition.x, y: initialPosition.y + offset)
+            let pos = CGPoint(x: safePosition.x, y: safePosition.y + offset)
             return VerletPoint(position: pos, previous: pos)
         }
     }
@@ -123,7 +126,7 @@ final class RopeRenderView: NSView {
 
     private func stepSimulation(dt: CFTimeInterval) {
         guard !points.isEmpty else { return }
-        let cursor = currentCursorLocation()
+        let cursor = sanitized(currentCursorLocation())
         pinFirstPoint(to: cursor)
         integratePoints(dt: dt)
         satisfyConstraints(anchor: cursor)
@@ -140,8 +143,9 @@ final class RopeRenderView: NSView {
 
     private func pinFirstPoint(to position: CGPoint) {
         guard !points.isEmpty else { return }
-        points[0].position = position
-        points[0].previous = position
+        let safePosition = sanitized(position)
+        points[0].position = safePosition
+        points[0].previous = safePosition
     }
 
     private func integratePoints(dt: CFTimeInterval) {
@@ -150,12 +154,26 @@ final class RopeRenderView: NSView {
 
         for index in points.indices.dropFirst() {
             var point = points[index]
+            guard point.position.x.isFinite, point.position.y.isFinite else {
+                let resetPosition = sanitized(points[index - 1].position)
+                point.position = resetPosition
+                point.previous = resetPosition
+                points[index] = point
+                continue
+            }
             let velocity = CGPoint(x: (point.position.x - point.previous.x) * damping,
                                    y: (point.position.y - point.previous.y) * damping)
             let nextPosition = CGPoint(
                 x: point.position.x + velocity.x + gravityStep.x,
                 y: point.position.y + velocity.y + gravityStep.y
             )
+            guard nextPosition.x.isFinite, nextPosition.y.isFinite else {
+                let resetPosition = sanitized(points[index - 1].position)
+                point.position = resetPosition
+                point.previous = resetPosition
+                points[index] = point
+                continue
+            }
             point.previous = point.position
             point.position = nextPosition
             points[index] = point
@@ -163,12 +181,20 @@ final class RopeRenderView: NSView {
     }
 
     private func satisfyConstraints(anchor: CGPoint) {
+        guard anchor.x.isFinite, anchor.y.isFinite else {
+            resetRope(initialPosition: fallbackPosition)
+            return
+        }
         for _ in 0..<constraintIterations {
             guard points.count > 1 else { break }
             points[0].position = anchor
             for i in 0..<(points.count - 1) {
                 var p1 = points[i]
                 var p2 = points[i + 1]
+                guard p1.position.x.isFinite, p1.position.y.isFinite, p2.position.x.isFinite, p2.position.y.isFinite else {
+                    resetRope(initialPosition: anchor)
+                    return
+                }
                 let delta = CGPoint(x: p2.position.x - p1.position.x, y: p2.position.y - p1.position.y)
                 let distance = max(0.0001, hypot(delta.x, delta.y))
                 let error = segmentLength - distance
@@ -190,9 +216,20 @@ final class RopeRenderView: NSView {
         }
     }
 
+    private func sanitized(_ point: CGPoint) -> CGPoint {
+        guard point.x.isFinite, point.y.isFinite else { return fallbackPosition }
+        return point
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let context = NSGraphicsContext.current?.cgContext, points.count > 1 else { return }
+
+        let sanitizedPositions = points.map { sanitized($0.position) }
+        guard sanitizedPositions.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
+            resetRope(initialPosition: fallbackPosition)
+            return
+        }
 
         context.clear(bounds)
         context.setLineWidth(3)
@@ -205,9 +242,9 @@ final class RopeRenderView: NSView {
                                      colors: gradientColors as CFArray,
                                      locations: [0, 1]) {
             let path = CGMutablePath()
-            path.move(to: points[0].position)
-            for point in points.dropFirst() {
-                path.addLine(to: point.position)
+            path.move(to: sanitizedPositions[0])
+            for point in sanitizedPositions.dropFirst() {
+                path.addLine(to: point)
             }
             context.saveGState()
             context.addPath(path)
@@ -215,15 +252,15 @@ final class RopeRenderView: NSView {
             context.replacePathWithStrokedPath()
             context.clip()
             context.drawLinearGradient(gradient,
-                                       start: points.first?.position ?? .zero,
-                                       end: points.last?.position ?? .zero,
+                                       start: sanitizedPositions.first ?? fallbackPosition,
+                                       end: sanitizedPositions.last ?? fallbackPosition,
                                        options: [])
             context.restoreGState()
         }
 
-        for (index, point) in points.enumerated() {
+        for (index, point) in sanitizedPositions.enumerated() {
             let radius: CGFloat = index == 0 ? 4 : 3
-            let rect = CGRect(x: point.position.x - radius, y: point.position.y - radius, width: radius * 2, height: radius * 2)
+            let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
             context.setFillColor(NSColor.white.withAlphaComponent(index == 0 ? 0.9 : 0.6).cgColor)
             context.fillEllipse(in: rect)
         }
