@@ -221,6 +221,48 @@ final class RopeRenderView: NSView {
         return point
     }
 
+    private func catmullRomPoints(from points: [CGPoint], samplesPerSegment: Int = 14) -> [CGPoint] {
+        guard points.count > 1 else { return points }
+
+        var splinePoints: [CGPoint] = []
+        let padded: [CGPoint]
+        if let first = points.first, let last = points.last {
+            padded = [first] + points + [last]
+        } else {
+            padded = points
+        }
+
+        for i in 0..<(padded.count - 3) {
+            let p0 = padded[i]
+            let p1 = padded[i + 1]
+            let p2 = padded[i + 2]
+            let p3 = padded[i + 3]
+
+            splinePoints.append(p1)
+
+            for j in 1...samplesPerSegment {
+                let t = CGFloat(j) / CGFloat(samplesPerSegment)
+                let t2 = t * t
+                let t3 = t2 * t
+
+                let x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3)
+                let y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+                splinePoints.append(CGPoint(x: x, y: y))
+            }
+        }
+
+        if let last = points.last {
+            splinePoints.append(last)
+        }
+
+        return splinePoints
+    }
+
+    private func pseudoNoise(_ seed: Int) -> CGFloat {
+        let x = sin(CGFloat(seed) * 12.9898) * 43758.5453
+        return x - floor(x)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let context = NSGraphicsContext.current?.cgContext, points.count > 1 else { return }
@@ -232,37 +274,66 @@ final class RopeRenderView: NSView {
         }
 
         context.clear(bounds)
-        context.setLineWidth(3)
         context.setLineJoin(.round)
         context.setLineCap(.round)
 
-        let gradientColors = [NSColor.systemYellow.withAlphaComponent(0.9).cgColor,
-                              NSColor.systemOrange.withAlphaComponent(0.9).cgColor]
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                     colors: gradientColors as CFArray,
-                                     locations: [0, 1]) {
-            let path = CGMutablePath()
-            path.move(to: sanitizedPositions[0])
-            for point in sanitizedPositions.dropFirst() {
-                path.addLine(to: point)
-            }
-            context.saveGState()
-            context.addPath(path)
-            context.setLineWidth(3)
-            context.replacePathWithStrokedPath()
-            context.clip()
-            context.drawLinearGradient(gradient,
-                                       start: sanitizedPositions.first ?? fallbackPosition,
-                                       end: sanitizedPositions.last ?? fallbackPosition,
-                                       options: [])
-            context.restoreGState()
+        let smoothed = catmullRomPoints(from: sanitizedPositions)
+        guard smoothed.count > 1 else { return }
+
+        var totalLength: CGFloat = 0
+        for i in 0..<(smoothed.count - 1) {
+            let delta = CGPoint(x: smoothed[i + 1].x - smoothed[i].x, y: smoothed[i + 1].y - smoothed[i].y)
+            totalLength += max(0.0001, hypot(delta.x, delta.y))
+        }
+        guard totalLength > 0 else { return }
+
+        context.saveGState()
+        context.setShadow(offset: .zero, blur: 4, color: NSColor.black.withAlphaComponent(0.15).cgColor)
+
+        let maxWidth: CGFloat = 12
+        let minWidth: CGFloat = 3
+        let baseColor = NSColor(calibratedRed: 0.93, green: 0.71, blue: 0.33, alpha: 1.0)
+        let highlightColor = NSColor(calibratedRed: 1.0, green: 0.9, blue: 0.7, alpha: 1.0)
+
+        var traveled: CGFloat = 0
+        for i in 0..<(smoothed.count - 1) {
+            let start = smoothed[i]
+            let end = smoothed[i + 1]
+            let segmentVector = CGPoint(x: end.x - start.x, y: end.y - start.y)
+            let segmentLength = max(0.0001, hypot(segmentVector.x, segmentVector.y))
+
+            let progress = traveled / totalLength
+            let nextProgress = min(1, (traveled + segmentLength) / totalLength)
+            let midProgress = (progress + nextProgress) * 0.5
+
+            let taper = 1 - midProgress
+            let width = max(minWidth, maxWidth * taper)
+            let alpha = max(0, 0.95 * taper)
+
+            let noiseScale: CGFloat = 0.6
+            let noiseAngle = pseudoNoise(i) * .pi * 2
+            let jitter = CGPoint(x: cos(noiseAngle) * noiseScale, y: sin(noiseAngle) * noiseScale)
+
+            let jitteredStart = CGPoint(x: start.x + jitter.x, y: start.y + jitter.y)
+            let jitteredEnd = CGPoint(x: end.x - jitter.x, y: end.y - jitter.y)
+
+            context.setLineWidth(width)
+            context.setStrokeColor(baseColor.withAlphaComponent(alpha * 0.8).cgColor)
+            context.beginPath()
+            context.move(to: jitteredStart)
+            context.addLine(to: jitteredEnd)
+            context.strokePath()
+
+            context.setLineWidth(width * 0.6)
+            context.setStrokeColor(highlightColor.withAlphaComponent(alpha).cgColor)
+            context.beginPath()
+            context.move(to: jitteredStart)
+            context.addLine(to: jitteredEnd)
+            context.strokePath()
+
+            traveled += segmentLength
         }
 
-        for (index, point) in sanitizedPositions.enumerated() {
-            let radius: CGFloat = index == 0 ? 4 : 3
-            let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-            context.setFillColor(NSColor.white.withAlphaComponent(index == 0 ? 0.9 : 0.6).cgColor)
-            context.fillEllipse(in: rect)
-        }
+        context.restoreGState()
     }
 }
