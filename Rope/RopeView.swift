@@ -19,6 +19,7 @@ final class RopeRenderView: NSView {
     private var points: [VerletPoint] = []
     private var displayLink: CVDisplayLink?
     private var lastTimestamp: CFTimeInterval?
+    private var lastBoundsSize: CGSize = .zero
 
     private let gravity = CGPoint(x: 0, y: 1400)
     private let damping: CGFloat = 0.992
@@ -46,14 +47,27 @@ final class RopeRenderView: NSView {
         wantsLayer = true
         layer?.isOpaque = false
         layer?.backgroundColor = NSColor.clear.cgColor
-        resetRope(initialPosition: CGPoint(x: bounds.midX, y: bounds.midY))
-        startDisplayLink()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if points.isEmpty {
-            resetRope(initialPosition: CGPoint(x: bounds.midX, y: bounds.midY))
+
+        if window != nil {
+            resetRope(initialPosition: currentCursorLocation())
+            startDisplayLink()
+        } else {
+            stopDisplayLink()
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+
+        if lastBoundsSize != newSize {
+            lastBoundsSize = newSize
+            if window != nil {
+                resetRope(initialPosition: currentCursorLocation())
+            }
         }
     }
 
@@ -66,6 +80,8 @@ final class RopeRenderView: NSView {
     }
 
     private func startDisplayLink() {
+        guard displayLink == nil else { return }
+
         var link: CVDisplayLink?
         CVDisplayLinkCreateWithActiveCGDisplays(&link)
         guard let link else { return }
@@ -88,6 +104,7 @@ final class RopeRenderView: NSView {
             CVDisplayLinkStop(link)
         }
         displayLink = nil
+        lastTimestamp = nil
     }
 
     private func displayLinkFired(timestamp: CFTimeInterval) {
@@ -184,14 +201,14 @@ final class RopeRenderView: NSView {
 
         let gradientColors = [NSColor.systemYellow.withAlphaComponent(0.9).cgColor,
                               NSColor.systemOrange.withAlphaComponent(0.9).cgColor]
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: gradientColors as CFArray, locations: [0, 1]) {
+        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                     colors: gradientColors as CFArray,
+                                     locations: [0, 1]) {
             let path = CGMutablePath()
             path.move(to: points[0].position)
             for point in points.dropFirst() {
                 path.addLine(to: point.position)
             }
-            context.addPath(path)
-            context.replacePathWithStrokedPath()
             context.saveGState()
             context.addPath(path)
             context.setLineWidth(3)

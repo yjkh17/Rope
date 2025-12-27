@@ -36,14 +36,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.level = .statusBar
+        window.level = .screenSaver
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let hostingView = NSHostingView(rootView: RopeView())
         hostingView.frame = screenFrame
         hostingView.autoresizingMask = [.width, .height]
         window.contentView = hostingView
-        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         overlayWindow = window
     }
 }
