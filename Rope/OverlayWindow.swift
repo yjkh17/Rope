@@ -19,7 +19,9 @@ final class OverlayWindow: NSWindow {
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
-        let hostingView = NSHostingView(rootView: ContentView().ignoresSafeArea())
+        let hostingView = NSHostingView(rootView: RopeView().ignoresSafeArea())
+        hostingView.frame = screenFrame
+        hostingView.autoresizingMask = [.width, .height]
         contentView = hostingView
 
         setFrame(screenFrame, display: true)
