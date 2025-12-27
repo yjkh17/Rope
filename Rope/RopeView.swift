@@ -26,10 +26,17 @@ final class RopeRenderView: NSView {
     private let segmentLength: CGFloat = 18
     private let constraintIterations = 12
     private let segmentCount = 28
+    private let boundsPadding: CGFloat = 240
 
     private var fallbackPosition: CGPoint { CGPoint(x: bounds.midX, y: bounds.midY) }
 
     override var isFlipped: Bool { true }
+
+    private var clampedBounds: CGRect {
+        var rect = bounds.insetBy(dx: -boundsPadding, dy: -boundsPadding)
+        if rect.width.isZero || rect.height.isZero { return CGRect(origin: .zero, size: CGSize(width: 1, height: 1)) }
+        return rect
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -77,7 +84,7 @@ final class RopeRenderView: NSView {
         let safePosition = sanitized(initialPosition)
         points = (0..<segmentCount).map { index in
             let offset = CGFloat(index) * segmentLength
-            let pos = CGPoint(x: safePosition.x, y: safePosition.y + offset)
+            let pos = clamp(CGPoint(x: safePosition.x, y: safePosition.y + offset))
             return VerletPoint(position: pos, previous: pos)
         }
     }
@@ -175,7 +182,7 @@ final class RopeRenderView: NSView {
                 continue
             }
             point.previous = point.position
-            point.position = nextPosition
+            point.position = clamp(nextPosition)
             points[index] = point
         }
     }
@@ -187,7 +194,7 @@ final class RopeRenderView: NSView {
         }
         for _ in 0..<constraintIterations {
             guard points.count > 1 else { break }
-            points[0].position = anchor
+            points[0].position = clamp(anchor)
             for i in 0..<(points.count - 1) {
                 var p1 = points[i]
                 var p2 = points[i + 1]
@@ -210,15 +217,23 @@ final class RopeRenderView: NSView {
                     p2.position.x += offset.x
                     p2.position.y += offset.y
                 }
-                points[i] = p1
-                points[i + 1] = p2
+                points[i] = clamp(point: p1)
+                points[i + 1] = clamp(point: p2)
             }
         }
     }
 
     private func sanitized(_ point: CGPoint) -> CGPoint {
         guard point.x.isFinite, point.y.isFinite else { return fallbackPosition }
-        return point
+        return clamp(point)
+    }
+
+    private func clamp(_ point: CGPoint) -> CGPoint {
+        clamp(point: point)
+    }
+
+    private func clamp(point: CGPoint) -> CGPoint {
+        point.clamped(to: clampedBounds)
     }
 
     private func catmullRomPoints(from points: [CGPoint], samplesPerSegment: Int = 14) -> [CGPoint] {
@@ -262,6 +277,7 @@ final class RopeRenderView: NSView {
         let x = sin(CGFloat(seed) * 12.9898) * 43758.5453
         return x - floor(x)
     }
+
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -335,5 +351,13 @@ final class RopeRenderView: NSView {
         }
 
         context.restoreGState()
+    }
+}
+
+private extension CGPoint {
+    func clamped(to rect: CGRect) -> CGPoint {
+        let clampedX = min(rect.maxX, max(rect.minX, x))
+        let clampedY = min(rect.maxY, max(rect.minY, y))
+        return CGPoint(x: clampedX, y: clampedY)
     }
 }
