@@ -8,27 +8,42 @@
 import SwiftUI
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var overlayWindow: OverlayWindow?
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        overlayWindow = OverlayWindow()
-        overlayWindow?.orderFrontRegardless()
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        overlayWindow?.orderOut(nil)
-        overlayWindow = nil
-    }
-}
-
 @main
 struct RopeApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
         Settings {
             EmptyView()
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var overlayWindow: NSWindow?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        createOverlayWindow()
+    }
+
+    private func createOverlayWindow() {
+        let screenFrame = NSScreen.main?.frame ?? .zero
+        let window = NSWindow(
+            contentRect: screenFrame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = .screenSaver
+        window.ignoresMouseEvents = true
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let hostingView = NSHostingView(rootView: RopeView())
+        hostingView.frame = screenFrame
+        hostingView.autoresizingMask = [.width, .height]
+        window.contentView = hostingView
+        window.orderFrontRegardless()
+        overlayWindow = window
     }
 }
