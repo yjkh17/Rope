@@ -27,22 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func createOverlayWindow() {
-        let screenFrame = NSScreen.main?.frame ?? .zero
-        let window = NSWindow(
-            contentRect: screenFrame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.level = .screenSaver
-        window.ignoresMouseEvents = true
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let hostingView = NSHostingView(rootView: RopeView())
-        hostingView.frame = screenFrame
-        hostingView.autoresizingMask = [.width, .height]
-        window.contentView = hostingView
+        let window = OverlayWindow()
         window.orderFrontRegardless()
         overlayWindow = window
     }
